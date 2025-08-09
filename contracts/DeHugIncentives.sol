@@ -21,7 +21,6 @@ contract DeHugIncentives is ERC1155, Ownable, ReentrancyGuard {
         string ipfsHash;
         string metadataIPFSHash;
         string title;
-        string description;
         QualityTier qualityTier;
         uint256 downloadCount;
         uint256 totalPointsEarned;
@@ -54,13 +53,26 @@ contract DeHugIncentives is ERC1155, Ownable, ReentrancyGuard {
         _tokenIdCounter = 0;
     }
     
+    /**
+     * @dev Get the latest token ID (most recently minted)
+     */
+    function getLatestTokenId() external view returns (uint256) {
+        return _tokenIdCounter;
+    }
+    
+    /**
+     * @dev Get the total number of tokens minted
+     */
+    function totalSupply() external view returns (uint256) {
+        return _tokenIdCounter;
+    }
+    
     function uploadContent(
         ContentType _contentType,
         string memory _ipfsHash,
         string memory _metadataIPFSHash,
         string memory _imageIPFSHash,
         string memory _title,
-        string memory _description,
         string[] memory _tags
     ) external returns (uint256) {
         require(bytes(_ipfsHash).length > 0, "IPFS hash cannot be empty");
@@ -79,7 +91,6 @@ contract DeHugIncentives is ERC1155, Ownable, ReentrancyGuard {
             ipfsHash: _ipfsHash,
             metadataIPFSHash: _metadataIPFSHash,
             title: _title,
-            description: _description,
             qualityTier: qualityTier,
             downloadCount: 0,
             totalPointsEarned: 0,
@@ -117,7 +128,7 @@ contract DeHugIncentives is ERC1155, Ownable, ReentrancyGuard {
         uint256 pointsToAward = basePoints;
         
         if (content.qualityTier == QualityTier.PREMIUM) {
-            pointsToAward = (pointsToAward * 3) / 2; // 1.5x THIS WOULD BE CHECKED AS IT WILL ROUND DOWN THE VALUES
+            pointsToAward = (pointsToAward * 15) / 10; // 1.5x
         } else if (content.qualityTier == QualityTier.VERIFIED) {
             pointsToAward = pointsToAward * QUALITY_BONUS_MULTIPLIER; // 2x
         }
@@ -173,7 +184,6 @@ contract DeHugIncentives is ERC1155, Ownable, ReentrancyGuard {
         ContentType contentType,
         string memory ipfsHash,
         string memory title,
-        string memory description,
         QualityTier qualityTier,
         uint256 downloadCount,
         uint256 totalPointsEarned,
@@ -187,13 +197,67 @@ contract DeHugIncentives is ERC1155, Ownable, ReentrancyGuard {
             content.contentType,
             content.ipfsHash,
             content.title,
-            content.description,
             content.qualityTier,
             content.downloadCount,
             content.totalPointsEarned,
             content.uploadTimestamp,
             content.isActive
         );
+    }
+    
+    /**
+     * @dev Get content metadata IPFS hash for fetching full details
+     */
+    function getContentMetadata(uint256 _tokenId) external view returns (string memory) {
+        require(_exists(_tokenId), "Token does not exist");
+        return contents[_tokenId].metadataIPFSHash;
+    }
+    
+    /**
+     * @dev Get multiple content items at once (pagination support)
+     */
+    function getContentBatch(uint256[] calldata _tokenIds) external view returns (
+        address[] memory uploaders,
+        ContentType[] memory contentTypes,
+        string[] memory ipfsHashes,
+        string[] memory titles,
+        QualityTier[] memory qualityTiers,
+        uint256[] memory downloadCounts,
+        bool[] memory isActiveList
+    ) {
+        uint256 length = _tokenIds.length;
+        uploaders = new address[](length);
+        contentTypes = new ContentType[](length);
+        ipfsHashes = new string[](length);
+        titles = new string[](length);
+        qualityTiers = new QualityTier[](length);
+        downloadCounts = new uint256[](length);
+        isActiveList = new bool[](length);
+        
+        for (uint256 i = 0; i < length; i++) {
+            require(_exists(_tokenIds[i]), "Token does not exist");
+            Content memory content = contents[_tokenIds[i]];
+            uploaders[i] = content.uploader;
+            contentTypes[i] = content.contentType;
+            ipfsHashes[i] = content.ipfsHash;
+            titles[i] = content.title;
+            qualityTiers[i] = content.qualityTier;
+            downloadCounts[i] = content.downloadCount;
+            isActiveList[i] = content.isActive;
+        }
+    }
+    
+    /**
+     * @dev Get latest N content items
+     */
+    function getLatestContent(uint256 _count) external view returns (uint256[] memory tokenIds) {
+        uint256 totalTokens = _tokenIdCounter;
+        uint256 count = _count > totalTokens ? totalTokens : _count;
+        
+        tokenIds = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            tokenIds[i] = totalTokens - i;
+        }
     }
     
     function getUserContent(address _user) external view returns (uint256[] memory) {
@@ -224,6 +288,9 @@ contract DeHugIncentives is ERC1155, Ownable, ReentrancyGuard {
         
         userProfiles[msg.sender].totalPoints -= _points;
         userProfiles[msg.sender].tokenBalances[_tokenId] -= _points;
+
+        // TODO: Implement redemption logic (e.g., premium features, compute credits)
+        // uint256 tokensToMint = _points / 100; // 100 points = 1 DEHUG
     }
     
     function deactivateContent(uint256 _tokenId) external {
@@ -239,16 +306,10 @@ contract DeHugIncentives is ERC1155, Ownable, ReentrancyGuard {
         
         profile.reputationScore = newScore;
         
-        if (newScore >= 1000 && !profile.isPremiumContributor) {
-            profile.isPremiumContributor = true;
-        }
-        
-        if (oldScore != newScore) {
-            if (newScore < 1000) {
-                profile.isPremiumContributor = false;
-            } else if (newScore >= 1000 && !profile.isPremiumContributor) {
-                profile.isPremiumContributor = true;
-            }  
+        // Simplified premium contributor logic
+        bool shouldBePremium = newScore >= 1000;
+        if (profile.isPremiumContributor != shouldBePremium) {
+            profile.isPremiumContributor = shouldBePremium;
         }
 
         emit ReputationUpdated(_user, oldScore, newScore);
